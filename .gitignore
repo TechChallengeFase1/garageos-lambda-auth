@@ -1,0 +1,15 @@
+# Dependencias e artefatos de build
+node_modules/
+*.zip
+
+# Terraform
+.terraform/
+.terraform.tfstate.lock.info
+*.tfstate
+*.tfstate.*
+*.tfvars
+!producao.tfvars
+*.tfplan
+
+# NOTA: .terraform.lock.hcl e package-lock.json entram no repositorio de
+# proposito - travam as versoes exatas de providers e dependencias.

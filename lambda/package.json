@@ -1,0 +1,10 @@
+{
+  "name": "garageos-lambda-auth",
+  "version": "1.0.0",
+  "description": "Autenticacao por CPF do GarageOS: valida o CPF, consulta o cliente no RDS e emite um JWT",
+  "type": "module",
+  "private": true,
+  "dependencies": {
+    "pg": "^8.13.1"
+  }
+}
