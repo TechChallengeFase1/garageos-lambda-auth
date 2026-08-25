@@ -1,0 +1,174 @@
+name: Terraform
+
+# Mesma estrategia dos repositorios de infraestrutura:
+#
+#   Pull Request  -> fmt + validate + plan. Nunca aplica.
+#   push main     -> apply
+#   Run workflow  -> plan, apply ou destroy
+#
+# Autenticacao por OIDC. Nenhuma credencial estatica da AWS neste repositorio.
+#
+# Diferenca em relacao aos outros: aqui ha um passo de `npm ci` antes do
+# Terraform. As dependencias nao sao versionadas, e o zip da Lambda e montado
+# pelo provider archive a partir do diretorio lambda/ - se node_modules nao
+# existir, a funcao sobe sem a biblioteca `pg` e falha na primeira invocacao.
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - '*.tf'
+      - '*.tfvars'
+      - '.terraform.lock.hcl'
+      - 'lambda/**'
+      - '.github/workflows/terraform.yml'
+  push:
+    branches: [main]
+    paths:
+      - '*.tf'
+      - '*.tfvars'
+      - '.terraform.lock.hcl'
+      - 'lambda/**'
+      - '.github/workflows/terraform.yml'
+  workflow_dispatch:
+    inputs:
+      acao:
+        description: "plan (so mostra) | apply (cria) | destroy (remove a Lambda e o gateway)"
+        required: true
+        default: plan
+        type: choice
+        options: [plan, apply, destroy]
+
+permissions:
+  id-token: write
+  contents: read
+  pull-requests: write
+
+env:
+  AWS_REGION: us-east-1
+  AWS_ROLE: arn:aws:iam::266380777968:role/garageos-github-actions
+  TF_VERSION: 1.15.7
+  AMBIENTE: producao
+
+concurrency:
+  group: terraform-${{ github.event_name == 'pull_request' && github.base_ref || github.ref_name }}
+  cancel-in-progress: false
+
+jobs:
+  terraform:
+    name: ${{ github.event_name == 'pull_request' && 'Validar' || 'Executar' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    environment: ${{ github.event_name == 'pull_request' && 'validacao' || 'producao' }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Definir contexto
+        id: ctx
+        run: |
+          if [ "${{ github.event_name }}" = "push" ] || [ "${{ inputs.acao }}" = "apply" ]; then
+            echo "aplicar=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "aplicar=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Autenticar na AWS via OIDC
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ env.AWS_ROLE }}
+          role-session-name: tf-lambda-${{ github.run_id }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      # As dependencias precisam existir ANTES do Terraform: o zip e montado a
+      # partir do diretorio lambda/ como ele estiver no disco.
+      - name: Instalar dependencias da Lambda
+        working-directory: lambda
+        run: npm ci --omit=dev
+
+      - name: Instalar Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+          terraform_wrapper: false
+
+      - name: Formatacao
+        run: terraform fmt -check -diff
+
+      - name: Init
+        run: terraform init -input=false
+
+      - name: Validate
+        run: terraform validate -no-color
+
+      - name: Selecionar workspace
+        run: terraform workspace select -or-create "$AMBIENTE"
+
+      - name: Plan
+        if: inputs.acao != 'destroy'
+        run: terraform plan -input=false -no-color -out=tfplan
+
+      - name: Resumo do plano
+        if: inputs.acao != 'destroy'
+        run: |
+          {
+            echo "### Terraform - $AMBIENTE"
+            echo '```'
+            terraform show -no-color tfplan | tail -40
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Apply
+        if: steps.ctx.outputs.aplicar == 'true'
+        run: terraform apply -input=false -auto-approve tfplan
+
+      # Prova que o fluxo funciona de ponta a ponta, e nao apenas que os
+      # recursos foram criados.
+      - name: Validar o fluxo de autenticacao
+        if: steps.ctx.outputs.aplicar == 'true'
+        run: |
+          URL=$(terraform output -raw api_gateway_url)
+          echo "Gateway: $URL"
+
+          echo "--- rota protegida SEM token (esperado 401) ---"
+          CODIGO=$(curl -s -o /dev/null -w "%{http_code}" "$URL/api/Clientes")
+          echo "HTTP $CODIGO"
+          if [ "$CODIGO" != "401" ]; then
+            echo "::error::Rota protegida respondeu $CODIGO em vez de 401. O authorizer nao esta barrando."
+            exit 1
+          fi
+
+          echo "--- CPF invalido (esperado 400) ---"
+          CODIGO=$(curl -s -o /dev/null -w "%{http_code}" -X POST "$URL/auth" \
+            -H "content-type: application/json" -d '{"cpf":"11111111111"}')
+          echo "HTTP $CODIGO"
+          if [ "$CODIGO" != "400" ]; then
+            echo "::error::CPF invalido respondeu $CODIGO em vez de 400."
+            exit 1
+          fi
+
+          echo "Authorizer e validacao de CPF funcionando."
+
+      - name: Resumo
+        if: steps.ctx.outputs.aplicar == 'true'
+        run: |
+          {
+            echo "### API Gateway provisionado"
+            echo ""
+            echo "| | |"
+            echo "|---|---|"
+            echo "| URL | $(terraform output -raw api_gateway_url) |"
+            echo "| Autenticacao | $(terraform output -raw endpoint_autenticacao) |"
+            echo "| Destino | $(terraform output -raw load_balancer_destino) |"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Destroy
+        if: github.event_name == 'workflow_dispatch' && inputs.acao == 'destroy'
+        run: terraform destroy -input=false -auto-approve
