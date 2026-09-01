@@ -137,6 +137,26 @@ jobs:
           URL=$(terraform output -raw api_gateway_url)
           echo "Gateway: $URL"
 
+          # O stage usa auto_deploy. As duas rotas nascem no mesmo apply, mas
+          # entram em vigor em momentos ligeiramente diferentes - e este passo
+          # roda logo em seguida.
+          #
+          # Enquanto "POST /auth" nao esta publicada, a requisicao nao encontra
+          # rota especifica e casa com o curinga "ANY /{proxy+}", que e
+          # protegido pelo authorizer: o gateway devolve 401. O sintoma parece
+          # erro de configuracao do authorizer, mas e so propagacao.
+          echo "--- aguardando a rota publica entrar em vigor ---"
+          for i in $(seq 1 20); do
+            CODIGO=$(curl -s -o /dev/null -w "%{http_code}" -X POST "$URL/auth" \
+              -H "content-type: application/json" -d '{"cpf":"11111111111"}')
+            if [ "$CODIGO" = "400" ]; then
+              echo "rota publica no ar apos $i tentativa(s)"
+              break
+            fi
+            echo "tentativa $i: HTTP $CODIGO"
+            sleep 5
+          done
+
           echo "--- rota protegida SEM token (esperado 401) ---"
           CODIGO=$(curl -s -o /dev/null -w "%{http_code}" "$URL/api/Clientes")
           echo "HTTP $CODIGO"
