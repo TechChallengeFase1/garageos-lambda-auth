@@ -4,6 +4,8 @@ Autenticação por **CPF** do GarageOS em AWS Lambda, e o **API Gateway HTTP API
 
 > Um dos quatro repositórios do Tech Challenge — Fase 3. É o **último** a ser aplicado: ele descobre o Load Balancer criado pela aplicação.
 
+> **Fase 4:** a tabela `"Clientes"` passou a pertencer ao **OS Service** (`garageos-os-service`), que tem banco próprio. A Lambda é tratada como componente de borda desse serviço: lê o banco dele, e só dele, com a role **`auth_reader`**, que tem `SELECT` apenas nas colunas que a função consulta (`Id`, `Nome`, `Email`, `Ativo`, `DocumentoValor`). Nunca com o usuário master. Endereço e credencial vêm do SSM em `/garageos/<env>/services/os/rds/*`, publicados pelo `infra/` do OS Service; a role é criada pelo Job `db-bootstrap` de lá. Por isso a ordem de subida passa a ser: CD do OS Service antes deste repositório.
+
 ---
 
 ## O que este repositório provisiona

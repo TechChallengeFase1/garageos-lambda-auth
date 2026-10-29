@@ -80,8 +80,8 @@ resource "aws_lambda_function" "auth" {
       PGHOST     = local.rds_endpoint
       PGPORT     = local.rds_port
       PGDATABASE = local.rds_dbname
-      PGUSER     = local.rds.username
-      PGPASSWORD = local.rds.password
+      PGUSER     = local.auth_reader.username
+      PGPASSWORD = local.auth_reader.password
 
       # A MESMA chave que a API .NET usa para validar. Vem do mesmo segredo no
       # Secrets Manager - e o que impede a divergencia que faria a API rejeitar
