@@ -13,25 +13,32 @@ data "aws_ssm_parameter" "private_subnet_ids" {
 }
 
 # O "cracha" criado pelo garageos-infra-database. Anexa-lo a Lambda e o que
-# libera a porta 5432 do RDS para ela - o mesmo mecanismo usado nos nos do EKS.
+# libera a porta 5432 do RDS do OS Service para ela - o mesmo mecanismo usado
+# nos nos do EKS.
 data "aws_ssm_parameter" "rds_client_sg_id" {
   name = "/${var.project}/${local.env}/rds/client-security-group-id"
 }
 
-data "aws_ssm_parameter" "rds_endpoint" {
-  name = "/${var.project}/${local.env}/rds/endpoint"
+# Banco do OS Service, dono da tabela "Clientes" (Fase 4).
+#
+# A Lambda e componente de borda do OS Service: e por isso que le o banco dele,
+# e so dele. Nunca com o usuario master: a credencial e a da role auth_reader,
+# que so tem SELECT nas colunas de "Clientes" que esta funcao consulta
+# (garageos-os-service/sql/criar-auth-reader.sql).
+data "aws_ssm_parameter" "os_rds_endpoint" {
+  name = "/${var.project}/${local.env}/services/os/rds/endpoint"
 }
 
-data "aws_ssm_parameter" "rds_port" {
-  name = "/${var.project}/${local.env}/rds/port"
+data "aws_ssm_parameter" "os_rds_port" {
+  name = "/${var.project}/${local.env}/services/os/rds/port"
 }
 
-data "aws_ssm_parameter" "rds_dbname" {
-  name = "/${var.project}/${local.env}/rds/dbname"
+data "aws_ssm_parameter" "os_rds_dbname" {
+  name = "/${var.project}/${local.env}/services/os/rds/dbname"
 }
 
-data "aws_ssm_parameter" "rds_secret_arn" {
-  name = "/${var.project}/${local.env}/rds/secret-arn"
+data "aws_ssm_parameter" "os_auth_reader_secret_arn" {
+  name = "/${var.project}/${local.env}/services/os/rds/auth-reader-secret-arn"
 }
 
 data "aws_ssm_parameter" "app_secret_arn" {
@@ -50,8 +57,8 @@ data "aws_ssm_parameter" "app_secret_arn" {
 # E o mesmo padrao ja usado na aplicacao, onde a pipeline le o Secrets Manager
 # e cria o Secret do Kubernetes: a fonte da verdade continua sendo o cofre.
 
-data "aws_secretsmanager_secret_version" "rds" {
-  secret_id = data.aws_ssm_parameter.rds_secret_arn.value
+data "aws_secretsmanager_secret_version" "auth_reader" {
+  secret_id = data.aws_ssm_parameter.os_auth_reader_secret_arn.value
 }
 
 data "aws_secretsmanager_secret_version" "app" {
@@ -72,10 +79,10 @@ data "aws_lb" "api" {
 locals {
   private_subnet_ids = split(",", nonsensitive(data.aws_ssm_parameter.private_subnet_ids.value))
   rds_client_sg_id   = nonsensitive(data.aws_ssm_parameter.rds_client_sg_id.value)
-  rds_endpoint       = nonsensitive(data.aws_ssm_parameter.rds_endpoint.value)
-  rds_port           = nonsensitive(data.aws_ssm_parameter.rds_port.value)
-  rds_dbname         = nonsensitive(data.aws_ssm_parameter.rds_dbname.value)
+  rds_endpoint       = nonsensitive(data.aws_ssm_parameter.os_rds_endpoint.value)
+  rds_port           = nonsensitive(data.aws_ssm_parameter.os_rds_port.value)
+  rds_dbname         = nonsensitive(data.aws_ssm_parameter.os_rds_dbname.value)
 
-  rds          = jsondecode(data.aws_secretsmanager_secret_version.rds.secret_string)
+  auth_reader  = jsondecode(data.aws_secretsmanager_secret_version.auth_reader.secret_string)
   segredos_app = jsondecode(data.aws_secretsmanager_secret_version.app.secret_string)
 }
