@@ -1,9 +1,13 @@
 # ─── API Gateway HTTP API ────────────────────────────────────────────────────
 #
-# A porta de entrada da solucao. Duas rotas:
+# A porta de entrada da solucao. Tres rotas:
 #
 #   POST /auth        -> Lambda de autenticacao.   PUBLICA (e onde se obtem o
 #                        token; exigir token aqui seria circular)
+#   POST /billing/api/webhooks/mercadopago
+#                     -> Load Balancer da API.     PUBLICA (quem chama e o
+#                        Mercado Pago; a defesa e a assinatura x-signature,
+#                        validada pelo Billing)
 #   ANY  /{proxy+}    -> Load Balancer da API.     PROTEGIDA pelo authorizer
 #
 # HTTP API (v2) em vez de REST API (v1): mesma funcionalidade para este caso,
@@ -111,6 +115,34 @@ resource "aws_apigatewayv2_route" "api" {
   # Sem token valido, a requisicao e recusada AQUI - nao chega ao cluster.
   authorization_type = "CUSTOM"
   authorizer_id      = aws_apigatewayv2_authorizer.jwt.id
+}
+
+# ─── Rota publica: webhook do Mercado Pago ───────────────────────────────────
+#
+# O Mercado Pago nao tem como mandar nosso JWT. Sendo a rota mais especifica, ela
+# ganha do {proxy+} so neste caminho e so no POST: o resto do Billing segue
+# protegido. Cabecalhos e query string (x-signature, data.id) chegam intactos.
+
+resource "aws_apigatewayv2_integration" "webhook_mercadopago" {
+  api_id             = aws_apigatewayv2_api.main.id
+  integration_type   = "HTTP_PROXY"
+  integration_uri    = "http://${data.aws_lb.api.dns_name}/billing/api/webhooks/mercadopago"
+  integration_method = "POST"
+}
+
+resource "aws_apigatewayv2_route" "webhook_mercadopago" {
+  api_id    = aws_apigatewayv2_api.main.id
+  route_key = "POST /billing/api/webhooks/mercadopago"
+  target    = "integrations/${aws_apigatewayv2_integration.webhook_mercadopago.id}"
+  # Sem authorizer de proposito: ver acima.
+}
+
+# URL publica da solucao. O Billing le para montar a notification_url das cobrancas.
+resource "aws_ssm_parameter" "apigw_url" {
+  name        = "/${var.project}/${local.env}/apigw/url"
+  description = "URL base do API Gateway"
+  type        = "String"
+  value       = aws_apigatewayv2_api.main.api_endpoint
 }
 
 # ─── Stage ───────────────────────────────────────────────────────────────────
