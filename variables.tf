@@ -10,18 +10,6 @@ variable "project" {
   default     = "garageos"
 }
 
-variable "namespace" {
-  description = "Namespace onde a aplicacao roda no EKS. Usado para achar o Load Balancer pela tag."
-  type        = string
-  default     = "garageos"
-}
-
-variable "service_name" {
-  description = "Nome do Service da API no Kubernetes"
-  type        = string
-  default     = "garageos-api"
-}
-
 variable "jwt_expires_in_seconds" {
   description = "Validade do token emitido. 3600 = 1 hora."
   type        = number
