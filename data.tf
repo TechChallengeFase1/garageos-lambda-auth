@@ -68,11 +68,15 @@ data "aws_secretsmanager_secret_version" "app" {
 # ─── Load Balancer da aplicacao ──────────────────────────────────────────────
 #
 # Criado pelo Kubernetes, nao pelo Terraform - por isso e descoberto por tag em
-# vez de referenciado. E o destino para onde o API Gateway encaminha as
-# requisicoes ja autenticadas.
+# vez de referenciado. E o NLB do Traefik, unico da solucao: o API Gateway manda
+# tudo para ele, e o Traefik escolhe o microsservico pelo prefixo do caminho.
+data "aws_ssm_parameter" "ingress_service_name" {
+  name = "/${var.project}/${local.env}/ingress/service-name"
+}
+
 data "aws_lb" "api" {
   tags = {
-    "kubernetes.io/service-name" = "${var.namespace}/${var.service_name}"
+    "kubernetes.io/service-name" = nonsensitive(data.aws_ssm_parameter.ingress_service_name.value)
   }
 }
 
