@@ -144,11 +144,15 @@ resource "aws_apigatewayv2_route" "webhook_mercadopago" {
 #
 # Login administrativo: e aqui que se obtem o token, exigir token seria circular.
 # Acompanhamento: o cliente consulta a OS pelo numero, sem login.
+# Saude: o smoke test do deploy e monitoramento externo, em HTTPS.
 
 locals {
   rotas_publicas_os = {
-    login      = { rota = "POST /os/api/auth/login", caminho = "os/api/auth/login", metodo = "POST" }
-    acompanhar = { rota = "GET /os/api/ordensdeservico/acompanhar/{numeroOS}", caminho = "os/api/ordensdeservico/acompanhar/{numeroOS}", metodo = "GET" }
+    login          = { rota = "POST /os/api/auth/login", caminho = "os/api/auth/login", metodo = "POST" }
+    acompanhar     = { rota = "GET /os/api/ordensdeservico/acompanhar/{numeroOS}", caminho = "os/api/ordensdeservico/acompanhar/{numeroOS}", metodo = "GET" }
+    saude_os       = { rota = "GET /os/health/ready", caminho = "os/health/ready", metodo = "GET" }
+    saude_billing  = { rota = "GET /billing/health/ready", caminho = "billing/health/ready", metodo = "GET" }
+    saude_execucao = { rota = "GET /execucao/health/ready", caminho = "execucao/health/ready", metodo = "GET" }
   }
 }
 
