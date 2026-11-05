@@ -1,6 +1,6 @@
 # ─── API Gateway HTTP API ────────────────────────────────────────────────────
 #
-# A porta de entrada da solucao. Tres rotas:
+# A porta de entrada da solucao. Rotas:
 #
 #   POST /auth        -> Lambda de autenticacao.   PUBLICA (e onde se obtem o
 #                        token; exigir token aqui seria circular)
@@ -8,6 +8,9 @@
 #                     -> Load Balancer da API.     PUBLICA (quem chama e o
 #                        Mercado Pago; a defesa e a assinatura x-signature,
 #                        validada pelo Billing)
+#   POST /os/api/auth/login e GET /os/api/ordensdeservico/acompanhar/{numeroOS}
+#                     -> Load Balancer da API.     PUBLICAS (login administrativo e
+#                        acompanhamento da OS pelo cliente)
 #   ANY  /{proxy+}    -> Load Balancer da API.     PROTEGIDA pelo authorizer
 #
 # HTTP API (v2) em vez de REST API (v1): mesma funcionalidade para este caso,
@@ -135,6 +138,39 @@ resource "aws_apigatewayv2_route" "webhook_mercadopago" {
   route_key = "POST /billing/api/webhooks/mercadopago"
   target    = "integrations/${aws_apigatewayv2_integration.webhook_mercadopago.id}"
   # Sem authorizer de proposito: ver acima.
+}
+
+# ─── Rotas publicas do OS ────────────────────────────────────────────────────
+#
+# Login administrativo: e aqui que se obtem o token, exigir token seria circular.
+# Acompanhamento: o cliente consulta a OS pelo numero, sem login.
+# Saude: o smoke test do deploy e monitoramento externo, em HTTPS.
+
+locals {
+  rotas_publicas_os = {
+    login          = { rota = "POST /os/api/auth/login", caminho = "os/api/auth/login", metodo = "POST" }
+    acompanhar     = { rota = "GET /os/api/ordensdeservico/acompanhar/{numeroOS}", caminho = "os/api/ordensdeservico/acompanhar/{numeroOS}", metodo = "GET" }
+    saude_os       = { rota = "GET /os/health/ready", caminho = "os/health/ready", metodo = "GET" }
+    saude_billing  = { rota = "GET /billing/health/ready", caminho = "billing/health/ready", metodo = "GET" }
+    saude_execucao = { rota = "GET /execucao/health/ready", caminho = "execucao/health/ready", metodo = "GET" }
+  }
+}
+
+resource "aws_apigatewayv2_integration" "publica_os" {
+  for_each = local.rotas_publicas_os
+
+  api_id             = aws_apigatewayv2_api.main.id
+  integration_type   = "HTTP_PROXY"
+  integration_uri    = "http://${data.aws_lb.api.dns_name}/${each.value.caminho}"
+  integration_method = each.value.metodo
+}
+
+resource "aws_apigatewayv2_route" "publica_os" {
+  for_each = local.rotas_publicas_os
+
+  api_id    = aws_apigatewayv2_api.main.id
+  route_key = each.value.rota
+  target    = "integrations/${aws_apigatewayv2_integration.publica_os[each.key].id}"
 }
 
 # URL publica da solucao. O Billing le para montar a notification_url das cobrancas.
